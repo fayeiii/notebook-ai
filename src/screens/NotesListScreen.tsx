@@ -52,9 +52,15 @@ const getNotePreview = (note: Note): string => {
     };
     return note.attachments.map((a) => types[a.type] || '附件').join('、');
   }
-  // 取第一行之后的内容作为预览
+  // 如果有标题，取正文作为预览；否则取第一行之后的内容
+  if (note.title.trim()) {
+    // 有标题时，正文整体作为预览
+    return content.substring(0, 80).replace(/\n/g, ' ') || '无其他内容';
+  }
+  // 无标题时，第一行当标题，剩余内容作为预览
   const lines = content.split('\n');
-  return lines.slice(1).join(' ').trim() || '无其他内容';
+  const rest = lines.slice(1).join(' ').trim();
+  return rest.substring(0, 80) || '无其他内容';
 };
 
 /** 获取笔记标题 */
@@ -69,19 +75,17 @@ const NotesListScreen: React.FC<Props> = ({ navigation, route }) => {
   const { folderId, folderName } = route.params;
   const { getNotesInFolder, addNote, deleteNote, togglePinNote, folders, moveNote } =
     useNotesStore();
+  // 订阅 notes 数组变化，确保返回时列表能刷新
+  const allNotes = useNotesStore((state) => state.notes);
 
-  const notes = useMemo(() => getNotesInFolder(folderId), [getNotesInFolder, folderId]);
+  const notes = useMemo(() => getNotesInFolder(folderId), [getNotesInFolder, folderId, allNotes]);
 
-  // 配置导航栏
+  // 移除右上角按钮，只保留底部新建按钮
   React.useLayoutEffect(() => {
     navigation.setOptions({
-      headerRight: () => (
-        <TouchableOpacity onPress={handleCreateNote} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-          <Text style={styles.headerButton}>✏️</Text>
-        </TouchableOpacity>
-      ),
+      headerRight: () => null,
     });
-  }, [navigation, folderId]);
+  }, [navigation]);
 
   const handleCreateNote = useCallback(() => {
     const targetFolderId = folderId === 'all-notes' ? 'default' : folderId;

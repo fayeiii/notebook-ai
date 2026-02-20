@@ -28,7 +28,6 @@ const Navigation: React.FC = () => {
             color: Colors.label,
           },
           headerShadowVisible: false,
-          headerBackTitleVisible: true,
           headerBackTitle: '返回',
           animation: 'default',
           contentStyle: {
