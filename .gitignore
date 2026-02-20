@@ -1,18 +1,56 @@
-# Xcode 相关
-.DS_Store
+# Dependencies
+node_modules
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native builds
+ios/
+android/
 Pods/
 DerivedData/
 *.xcworkspace
 *.xcuserstate
 
-# Android 相关（如果需要）
+# Android
 .idea/
 build/
 gradle/
 *.gradle
 local.properties
 
-# 日志和缓存
+# Metro
+.metro-health-check*
+
+# Debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+*.pem
+
+# IDE
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# TypeScript
+*.tsbuildinfo
+
+# Logs
 logs/
 *.log
-.vscode/
+
+# Testing
+coverage/

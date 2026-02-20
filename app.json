@@ -1,0 +1,31 @@
+{
+  "expo": {
+    "name": "AI 复盘助手",
+    "slug": "notebook-ai",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "notebook-ai",
+    "splash": {
+      "backgroundColor": "#F2F2F7"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.notebook.ai"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#F2F2F7"
+      },
+      "package": "com.notebook.ai"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-image-picker",
+      "expo-document-picker",
+      "expo-av"
+    ]
+  }
+}
