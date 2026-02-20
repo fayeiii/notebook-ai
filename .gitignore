@@ -1,0 +1,18 @@
+# Xcode 相关
+.DS_Store
+Pods/
+DerivedData/
+*.xcworkspace
+*.xcuserstate
+
+# Android 相关（如果需要）
+.idea/
+build/
+gradle/
+*.gradle
+local.properties
+
+# 日志和缓存
+logs/
+*.log
+.vscode/
