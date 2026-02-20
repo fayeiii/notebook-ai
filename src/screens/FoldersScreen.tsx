@@ -3,7 +3,7 @@
  * Apple 备忘录风格 - 文件夹管理
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -17,9 +17,12 @@ import {
   Platform,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { RootStackParamList } from '../types';
+import { RootStackParamList, Note } from '../types';
 import { Colors, Typography, Spacing, BorderRadius, Shadow } from '../theme';
 import { useNotesStore } from '../store/useNotesStore';
+import { Ionicons } from '@expo/vector-icons';
+import { format, isToday, isYesterday, isThisYear } from 'date-fns';
+import { zhCN } from 'date-fns/locale';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Folders'>;
 
@@ -42,11 +45,51 @@ const ICON_OPTIONS = Object.keys(FOLDER_ICONS);
 const COLOR_OPTIONS = Colors.folderColors;
 
 const FoldersScreen: React.FC<Props> = ({ navigation }) => {
-  const { folders, getNotesCount, addFolder, deleteFolder, togglePinFolder } = useNotesStore();
+  const { folders, getNotesCount, addFolder, deleteFolder, togglePinFolder, searchNotes } = useNotesStore();
+  const allNotes = useNotesStore((state) => state.notes);
   const [modalVisible, setModalVisible] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [selectedColor, setSelectedColor] = useState(COLOR_OPTIONS[0]);
   const [selectedIcon, setSelectedIcon] = useState('folder');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
+
+  // 模糊搜索结果
+  const searchResults = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    return searchNotes(searchQuery);
+  }, [searchQuery, searchNotes, allNotes]);
+
+  const isSearching = searchQuery.trim().length > 0;
+
+  /** 格式化搜索结果日期 */
+  const formatSearchDate = (dateStr: string): string => {
+    const date = new Date(dateStr);
+    if (isToday(date)) return format(date, 'HH:mm');
+    if (isYesterday(date)) return '昨天';
+    if (isThisYear(date)) return format(date, 'M月d日', { locale: zhCN });
+    return format(date, 'yyyy/M/d');
+  };
+
+  /** 获取笔记所属文件夹名 */
+  const getFolderName = useCallback((folderId: string): string => {
+    const folder = folders.find((f) => f.id === folderId);
+    return folder?.name || '未分类';
+  }, [folders]);
+
+  /** 获取匹配预览：高亮匹配关键词附近的内容 */
+  const getMatchPreview = (note: Note): string => {
+    const q = searchQuery.toLowerCase();
+    const content = note.content.trim();
+    // 优先显示正文匹配
+    const idx = content.toLowerCase().indexOf(q);
+    if (idx >= 0) {
+      const start = Math.max(0, idx - 10);
+      const slice = content.substring(start, start + 80).replace(/\n/g, ' ');
+      return (start > 0 ? '...' : '') + slice;
+    }
+    return content.substring(0, 80).replace(/\n/g, ' ') || '无内容';
+  };
 
   // 分组：置顶 & 其他
   const pinnedFolders = folders.filter((f) => f.isPinned);
@@ -136,7 +179,7 @@ const FoldersScreen: React.FC<Props> = ({ navigation }) => {
     if (data.length === 0) return null;
     return (
       <View style={styles.section}>
-        {title && pinnedFolders.length > 0 && unpinnedFolders.length > 0 && (
+        {!!title && pinnedFolders.length > 0 && unpinnedFolders.length > 0 && (
           <Text style={styles.sectionHeader}>{title}</Text>
         )}
         <View style={styles.sectionCard}>
@@ -153,18 +196,81 @@ const FoldersScreen: React.FC<Props> = ({ navigation }) => {
 
   return (
     <View style={styles.container}>
-      <FlatList
-        data={[]}
-        renderItem={null}
-        ListHeaderComponent={
-          <>
-            {renderSection('', pinnedFolders)}
-            {renderSection('文件夹', unpinnedFolders)}
-          </>
-        }
-        contentContainerStyle={styles.listContent}
-        contentInsetAdjustmentBehavior="automatic"
-      />
+      {/* 搜索栏 */}
+      <View style={styles.searchContainer}>
+        <View style={styles.searchBar}>
+          <Ionicons name="search" size={16} color={Colors.tertiaryLabel} style={styles.searchIcon} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="搜索"
+            placeholderTextColor={Colors.placeholderText}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            onFocus={() => setIsSearchFocused(true)}
+            onBlur={() => setIsSearchFocused(false)}
+            returnKeyType="search"
+            clearButtonMode="while-editing"
+          />
+          {!!searchQuery && (
+            <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.searchClear}>
+              <Ionicons name="close-circle" size={16} color={Colors.tertiaryLabel} />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
+      {isSearching ? (
+        /* 搜索结果列表 */
+        <FlatList
+          data={searchResults}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item: note, index }) => (
+            <TouchableOpacity
+              style={[
+                styles.searchResultItem,
+                index === 0 && styles.noteItemFirst,
+                index === searchResults.length - 1 && styles.noteItemLast,
+              ]}
+              activeOpacity={0.6}
+              onPress={() => navigation.navigate('NoteEditor', { noteId: note.id, folderId: note.folderId })}
+            >
+              <View style={styles.searchResultContent}>
+                <Text style={styles.searchResultTitle} numberOfLines={1}>
+                  {note.title.trim() || note.content.split('\n')[0]?.trim() || '新建笔记'}
+                </Text>
+                <Text style={styles.searchResultPreview} numberOfLines={1}>
+                  {getMatchPreview(note)}
+                </Text>
+                <View style={styles.searchResultMeta}>
+                  <Text style={styles.searchResultFolder}>{getFolderName(note.folderId)}</Text>
+                  <Text style={styles.searchResultDate}>{formatSearchDate(note.updatedAt)}</Text>
+                </View>
+              </View>
+            </TouchableOpacity>
+          )}
+          ItemSeparatorComponent={() => <View style={styles.searchDivider} />}
+          ListEmptyComponent={
+            <View style={styles.searchEmpty}>
+              <Text style={styles.searchEmptyText}>未找到“{searchQuery}”的结果</Text>
+            </View>
+          }
+          contentContainerStyle={styles.searchListContent}
+        />
+      ) : (
+        /* 文件夹列表 */
+        <FlatList
+          data={[]}
+          renderItem={null}
+          ListHeaderComponent={
+            <>
+              {renderSection('', pinnedFolders)}
+              {renderSection('文件夹', unpinnedFolders)}
+            </>
+          }
+          contentContainerStyle={styles.listContent}
+          contentInsetAdjustmentBehavior="automatic"
+        />
+      )}
 
       {/* 底部工具栏 */}
       <View style={styles.bottomBar}>
@@ -263,6 +369,91 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.groupedBackground,
+  },
+  searchContainer: {
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.sm,
+    backgroundColor: Colors.groupedBackground,
+  },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.secondarySystemFill,
+    borderRadius: BorderRadius.sm,
+    paddingHorizontal: Spacing.md,
+    height: 36,
+  },
+  searchIcon: {
+    marginRight: Spacing.xs,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: Typography.sizes.body,
+    color: Colors.label,
+    padding: 0,
+    height: 36,
+  },
+  searchClear: {
+    padding: 2,
+    marginLeft: Spacing.xs,
+  },
+  searchListContent: {
+    paddingHorizontal: Spacing.xl,
+    paddingBottom: 100,
+  },
+  searchResultItem: {
+    backgroundColor: Colors.secondaryGroupedBackground,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    minHeight: 68,
+  },
+  noteItemFirst: {
+    borderTopLeftRadius: BorderRadius.md,
+    borderTopRightRadius: BorderRadius.md,
+  },
+  noteItemLast: {
+    borderBottomLeftRadius: BorderRadius.md,
+    borderBottomRightRadius: BorderRadius.md,
+  },
+  searchResultContent: {
+    flex: 1,
+  },
+  searchResultTitle: {
+    fontSize: Typography.sizes.body,
+    fontWeight: Typography.weights.semibold,
+    color: Colors.label,
+    marginBottom: 2,
+  },
+  searchResultPreview: {
+    fontSize: Typography.sizes.subhead,
+    color: Colors.secondaryLabel,
+    marginBottom: 4,
+  },
+  searchResultMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  searchResultFolder: {
+    fontSize: Typography.sizes.caption1,
+    color: Colors.primary,
+    marginRight: Spacing.sm,
+  },
+  searchResultDate: {
+    fontSize: Typography.sizes.caption1,
+    color: Colors.tertiaryLabel,
+  },
+  searchDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: Colors.opaqueSeparator,
+    marginLeft: Spacing.lg,
+  },
+  searchEmpty: {
+    alignItems: 'center',
+    paddingVertical: Spacing.xxxl,
+  },
+  searchEmptyText: {
+    fontSize: Typography.sizes.subhead,
+    color: Colors.tertiaryLabel,
   },
   listContent: {
     paddingHorizontal: Spacing.xl,

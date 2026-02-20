@@ -102,26 +102,37 @@ export const BorderRadius = {
   round: 999,
 };
 
+import { Platform } from 'react-native';
+
 export const Shadow = {
-  small: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  medium: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  large: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    elevation: 5,
-  },
+  small: Platform.select({
+    web: { boxShadow: '0px 1px 2px rgba(0,0,0,0.05)' },
+    default: {
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.05,
+      shadowRadius: 2,
+      elevation: 1,
+    },
+  }) as Record<string, any>,
+  medium: Platform.select({
+    web: { boxShadow: '0px 2px 8px rgba(0,0,0,0.08)' },
+    default: {
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.08,
+      shadowRadius: 8,
+      elevation: 3,
+    },
+  }) as Record<string, any>,
+  large: Platform.select({
+    web: { boxShadow: '0px 4px 16px rgba(0,0,0,0.12)' },
+    default: {
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.12,
+      shadowRadius: 16,
+      elevation: 5,
+    },
+  }) as Record<string, any>,
 };

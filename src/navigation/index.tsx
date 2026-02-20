@@ -46,11 +46,6 @@ const Navigation: React.FC = () => {
               fontWeight: Typography.weights.bold,
               color: Colors.label,
             },
-            headerSearchBarOptions: {
-              placeholder: '搜索',
-              cancelButtonText: '取消',
-              hideWhenScrolling: true,
-            },
           }}
         />
         <Stack.Screen

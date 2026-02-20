@@ -3,7 +3,7 @@
  * Apple 备忘录风格 - 笔记列表展示
  */
 
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
   TouchableOpacity,
   Alert,
   Platform,
+  TextInput,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList, Note } from '../types';
@@ -19,6 +20,7 @@ import { Colors, Typography, Spacing, BorderRadius, Shadow } from '../theme';
 import { useNotesStore } from '../store/useNotesStore';
 import { format, isToday, isYesterday, isThisWeek, isThisYear } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
+import { Ionicons } from '@expo/vector-icons';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'NotesList'>;
 
@@ -79,6 +81,19 @@ const NotesListScreen: React.FC<Props> = ({ navigation, route }) => {
   const allNotes = useNotesStore((state) => state.notes);
 
   const notes = useMemo(() => getNotesInFolder(folderId), [getNotesInFolder, folderId, allNotes]);
+
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // 过滤后的笔记列表
+  const filteredNotes = useMemo(() => {
+    if (!searchQuery.trim()) return notes;
+    const q = searchQuery.toLowerCase();
+    return notes.filter(
+      (n) =>
+        n.title.toLowerCase().includes(q) ||
+        n.content.toLowerCase().includes(q)
+    );
+  }, [notes, searchQuery]);
 
   // 移除右上角按钮，只保留底部新建按钮
   React.useLayoutEffect(() => {
@@ -154,7 +169,7 @@ const NotesListScreen: React.FC<Props> = ({ navigation, route }) => {
           style={[
             styles.noteItem,
             index === 0 && styles.noteItemFirst,
-            index === notes.length - 1 && styles.noteItemLast,
+            index === filteredNotes.length - 1 && styles.noteItemLast,
           ]}
           activeOpacity={0.6}
           onPress={() => handleNotePress(note.id)}
@@ -184,7 +199,7 @@ const NotesListScreen: React.FC<Props> = ({ navigation, route }) => {
         </TouchableOpacity>
       );
     },
-    [notes.length, handleNotePress, handleNoteAction]
+    [filteredNotes.length, handleNotePress, handleNoteAction]
   );
 
   const renderSeparator = useCallback(
@@ -205,15 +220,36 @@ const NotesListScreen: React.FC<Props> = ({ navigation, route }) => {
 
   return (
     <View style={styles.container}>
+      {/* 搜索栏 */}
+      <View style={styles.searchContainer}>
+        <View style={styles.searchBar}>
+          <Ionicons name="search" size={16} color={Colors.tertiaryLabel} style={styles.searchIcon} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="搜索笔记"
+            placeholderTextColor={Colors.placeholderText}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            returnKeyType="search"
+            clearButtonMode="while-editing"
+          />
+          {!!searchQuery && (
+            <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.searchClear}>
+              <Ionicons name="close-circle" size={16} color={Colors.tertiaryLabel} />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
       <FlatList
-        data={notes}
+        data={filteredNotes}
         renderItem={renderNoteItem}
         keyExtractor={(item) => item.id}
         ItemSeparatorComponent={renderSeparator}
         ListEmptyComponent={renderEmpty}
         contentContainerStyle={[
           styles.listContent,
-          notes.length === 0 && styles.emptyListContent,
+          filteredNotes.length === 0 && styles.emptyListContent,
         ]}
         contentInsetAdjustmentBehavior="automatic"
       />
@@ -235,6 +271,33 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.groupedBackground,
+  },
+  searchContainer: {
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.sm,
+    backgroundColor: Colors.groupedBackground,
+  },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.secondarySystemFill,
+    borderRadius: BorderRadius.sm,
+    paddingHorizontal: Spacing.md,
+    height: 36,
+  },
+  searchIcon: {
+    marginRight: Spacing.xs,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: Typography.sizes.body,
+    color: Colors.label,
+    padding: 0,
+    height: 36,
+  },
+  searchClear: {
+    padding: 2,
+    marginLeft: Spacing.xs,
   },
   listContent: {
     paddingHorizontal: Spacing.xl,

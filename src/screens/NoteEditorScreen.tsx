@@ -28,6 +28,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
+import { Ionicons } from '@expo/vector-icons';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'NoteEditor'>;
 
@@ -83,11 +84,17 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
     buildBlocks(note?.content || '', note?.attachments || [])
   );
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
-  // 每个输入框的动态高度（key: block id 或 'title'）
+  // 是否有未保存的修改
+  const [isDirty, setIsDirty] = useState(false);
+  // 每个输入框的动态高度
   const [inputHeights, setInputHeights] = useState<Record<string, number>>({});
+  // 图片实际尺寸（用于按比例显示）
+  const [imageDimensions, setImageDimensions] = useState<Record<string, { w: number; h: number }>>({});
 
   const activeTextBlockId = useRef<string>('b0');
   const inputRefs = useRef<Map<string, TextInput | null>>(new Map());
+  // 每个文字块的光标位置
+  const blockSelectionsRef = useRef<Record<string, { start: number; end: number }>>({});
   const scrollViewRef = useRef<ScrollView>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -110,7 +117,9 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
 
   useEffect(() => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => doSave(title, blocks), 600);
+    saveTimerRef.current = setTimeout(() => {
+      doSave(title, blocks);
+    }, 600);
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
@@ -125,38 +134,40 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
     return () => { s1.remove(); s2.remove(); };
   }, []);
 
-  // ── 保存并返回 ──────────────────────────────────────────────────────────────
-  const handleSaveAndGoBack = useCallback(() => {
+  // ── 手动保存（完成按钮） ────────────────────────────────────────────────────
+  const handleSave = useCallback(() => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     doSave(title, blocks);
-    navigation.goBack();
-  }, [title, blocks, doSave, navigation]);
+    setIsDirty(false);
+  }, [title, blocks, doSave]);
 
   // ── 导航栏 ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     navigation.setOptions({
       headerShown: true,
-      headerLeft: () => (
-        <TouchableOpacity
-          onPress={handleSaveAndGoBack}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          style={styles.headerBtn}
-        >
-          <Text style={styles.backIcon}>{'‹'}</Text>
-        </TouchableOpacity>
-      ),
-      headerRight: () => (
-        <TouchableOpacity
-          onPress={handleSaveAndGoBack}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          style={styles.confirmBtn}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.confirmIcon}>{'✓'}</Text>
-        </TouchableOpacity>
-      ),
+      headerRight: () =>
+        isDirty ? (
+          <TouchableOpacity
+            onPress={handleSave}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            style={styles.confirmBtn}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="checkmark-circle" size={28} color={Colors.primary} />
+          </TouchableOpacity>
+        ) : null,
     });
-  }, [navigation, handleSaveAndGoBack]);
+  }, [navigation, handleSave, isDirty]);
+
+  // 拦截返回事件（系统返回按钮 / 手势），保证保存
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (e) => {
+      // 先保存再放行
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      doSave(title, blocks);
+    });
+    return unsubscribe;
+  }, [navigation, title, blocks, doSave]);
 
   // ── 清理空笔记 ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -175,6 +186,7 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
     setBlocks((prev) =>
       prev.map((b) => (b.id === id && b.kind === 'text' ? { ...b, text } : b))
     );
+    setIsDirty(true);
   }, []);
 
   // ── 插入媒体块 ──────────────────────────────────────────────────────────────
@@ -190,6 +202,7 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
       next.splice(insertAt, 0, mediaBlock, afterTextBlock);
       return next;
     });
+    setIsDirty(true);
 
     setTimeout(() => {
       inputRefs.current.get(afterId)?.focus();
@@ -217,6 +230,7 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
       }
       return next;
     });
+    setIsDirty(true);
   }, []);
 
   // ── 相机 ────────────────────────────────────────────────────────────────────
@@ -308,22 +322,36 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [handleCamera, handleImagePicker, handleDocumentPicker, handleAudioRecord]);
 
   // ── 渲染媒体块 ──────────────────────────────────────────────────────────────
+  const DISPLAY_WIDTH = SCREEN_WIDTH - Spacing.xl * 2;
+
   const renderMediaBlock = (block: MediaBlock) => {
     const { attachment } = block;
 
-    const onRemove = () =>
-      Alert.alert('删除附件', '确定删除此附件？', [
-        { text: '取消', style: 'cancel' },
-        { text: '删除', style: 'destructive', onPress: () => removeMediaBlock(block.id) },
-      ]);
-
     if (attachment.type === 'image') {
+      const dims = imageDimensions[block.id];
+      // 按图片真实比例计算高度；不强制截断，让竖图完整显示
+      const imageH = dims
+        ? DISPLAY_WIDTH * (dims.h / dims.w)
+        : DISPLAY_WIDTH * 0.65;
       return (
         <View key={block.id} style={styles.inlineMedia}>
-          <Image source={{ uri: attachment.uri }} style={styles.inlineImage} resizeMode="cover" />
-          <TouchableOpacity style={styles.removeButton} onPress={onRemove}>
-            <Text style={styles.removeIcon}>{'✕'}</Text>
-          </TouchableOpacity>
+          <Image
+            source={{ uri: attachment.uri }}
+            style={[styles.inlineImage, { height: imageH }]}
+            resizeMode="contain"
+            onLoad={(e) => {
+              // On native: e.nativeEvent.source = { width, height, ... }
+              // On web (react-native-web): source is undefined; use the DOM img element instead
+              const source = (e.nativeEvent as any).source;
+              const width: number | undefined =
+                source?.width ?? (e.nativeEvent as any).target?.naturalWidth;
+              const height: number | undefined =
+                source?.height ?? (e.nativeEvent as any).target?.naturalHeight;
+              if (width && height) {
+                setImageDimensions((prev) => ({ ...prev, [block.id]: { w: width, h: height } }));
+              }
+            }}
+          />
         </View>
       );
     }
@@ -331,27 +359,30 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
     if (attachment.type === 'video') {
       return (
         <View key={block.id} style={styles.inlineMedia}>
-          <View style={[styles.inlineImage, styles.videoPlaceholder]}>
+          <View style={[styles.inlineImage, { height: DISPLAY_WIDTH * 0.65 }, styles.videoPlaceholder]}>
             <Text style={styles.videoPlayIcon}>{'▶️'}</Text>
-            {attachment.duration && (
+            {!!attachment.duration && (
               <Text style={styles.videoDuration}>
                 {Math.floor(attachment.duration / 60)}:{String(Math.floor(attachment.duration % 60)).padStart(2, '0')}
               </Text>
             )}
           </View>
-          <TouchableOpacity style={styles.removeButton} onPress={onRemove}>
-            <Text style={styles.removeIcon}>{'✕'}</Text>
-          </TouchableOpacity>
         </View>
       );
     }
 
+    // 文件/音频 — 保留删除按钮（不影响行内编辑流）
+    const onRemove = () =>
+      Alert.alert('删除附件', '确定删除此附件？', [
+        { text: '取消', style: 'cancel' },
+        { text: '删除', style: 'destructive', onPress: () => removeMediaBlock(block.id) },
+      ]);
     return (
       <View key={block.id} style={styles.inlineFile}>
         <Text style={styles.fileIcon}>{attachment.type === 'audio' ? '🎵' : '📎'}</Text>
         <View style={styles.fileInfo}>
           <Text style={styles.fileName} numberOfLines={1}>{attachment.fileName}</Text>
-          {attachment.fileSize && (
+          {!!attachment.fileSize && (
             <Text style={styles.fileSize}>{formatFileSize(attachment.fileSize)}</Text>
           )}
         </View>
@@ -394,7 +425,7 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
           placeholder="标题"
           placeholderTextColor={Colors.placeholderText}
           value={title}
-          onChangeText={setTitle}
+          onChangeText={(t) => { setTitle(t); setIsDirty(true); }}
           multiline
           blurOnSubmit
           returnKeyType="next"
@@ -431,6 +462,29 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
                 selectionColor={Colors.primary}
                 onFocus={() => { activeTextBlockId.current = block.id; }}
                 onContentSizeChange={(e) => setHeight(block.id, e.nativeEvent.contentSize.height)}
+                onSelectionChange={(e) => {
+                  blockSelectionsRef.current[block.id] = e.nativeEvent.selection;
+                }}
+                onKeyPress={(e) => {
+                  if (e.nativeEvent.key === 'Backspace') {
+                    const sel = blockSelectionsRef.current[block.id];
+                    const atStart = !sel || (sel.start === 0 && sel.end === 0);
+                    if (atStart && block.text === '') {
+                      // 光标在开头且文字为空 → 删除上面的媒体块
+                      const idx = blocks.findIndex((b) => b.id === block.id);
+                      if (idx > 0 && blocks[idx - 1].kind === 'media') {
+                        e.preventDefault?.();
+                        removeMediaBlock(blocks[idx - 1].id);
+                        // 聚焦到合并后的文字块
+                        setTimeout(() => {
+                          const updated = blocks.filter((b) => b.id !== blocks[idx - 1].id && b.id !== block.id);
+                          const target = updated[Math.max(0, idx - 2)];
+                          if (target?.kind === 'text') inputRefs.current.get(target.id)?.focus();
+                        }, 50);
+                      }
+                    }
+                  }
+                }}
               />
             );
           }
@@ -493,21 +547,8 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
 
-  headerBtn: { padding: 4 },
-  backIcon: {
-    fontSize: 32,
-    color: Colors.primary,
-    fontWeight: '300' as any,
-    lineHeight: 34,
-  },
   confirmBtn: {
-    width: 32, height: 32, borderRadius: 16,
-    backgroundColor: Colors.primary,
-    justifyContent: 'center', alignItems: 'center',
-  },
-  confirmIcon: {
-    fontSize: 18, color: Colors.white,
-    fontWeight: Typography.weights.bold,
+    padding: 2,
   },
 
   dateText: {
@@ -548,11 +589,10 @@ const styles = StyleSheet.create({
     marginVertical: Spacing.sm,
     borderRadius: BorderRadius.md,
     overflow: 'hidden',
-    position: 'relative',
   },
   inlineImage: {
     width: '100%',
-    height: (SCREEN_WIDTH - Spacing.xl * 2) * 0.65,
+    // height 由动态计算传入，此处不设默认
     borderRadius: BorderRadius.md,
   },
   videoPlaceholder: {
