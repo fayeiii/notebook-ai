@@ -18,6 +18,11 @@ export interface Attachment {
   createdAt: string;
 }
 
+/** 可序列化的块（用于持久化，保留文字与附件的交错顺序） */
+export type StoredBlock =
+  | { kind: 'text'; text: string }
+  | { kind: 'media'; attachment: Attachment };
+
 /** 日记笔记 */
 export interface Note {
   id: string;
@@ -25,6 +30,8 @@ export interface Note {
   title: string;
   content: string;
   attachments: Attachment[];
+  /** 块结构，保留文字与附件的交错顺序；无此字段时用 content+attachments 兼容旧数据 */
+  blocks?: StoredBlock[];
   isPinned: boolean;
   createdAt: string;
   updatedAt: string;

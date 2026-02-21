@@ -21,7 +21,7 @@ import {
   Dimensions,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { RootStackParamList, Attachment, AttachmentType } from '../types';
+import { RootStackParamList, Attachment, AttachmentType, StoredBlock } from '../types';
 import { Colors, Typography, Spacing, BorderRadius } from '../theme';
 import { useNotesStore } from '../store/useNotesStore';
 import * as ImagePicker from 'expo-image-picker';
@@ -29,6 +29,8 @@ import * as DocumentPicker from 'expo-document-picker';
 import { format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import { Ionicons } from '@expo/vector-icons';
+import { formatNoteForAI, printForAI } from '../utils/formatForAI';
+import type { Note } from '../types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'NoteEditor'>;
 
@@ -49,7 +51,23 @@ type Block = TextBlock | MediaBlock;
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 
-const buildBlocks = (content: string, attachments: Attachment[]): Block[] => {
+/** 从存储的 blocks 恢复（保留文字与附件的交错顺序） */
+const blocksFromStored = (stored: StoredBlock[]): Block[] =>
+  stored.map((s) =>
+    s.kind === 'text'
+      ? { id: uid(), kind: 'text' as const, text: s.text }
+      : { id: s.attachment.id, kind: 'media' as const, attachment: s.attachment }
+  );
+
+/** 兼容旧数据：无 blocks 时用 content+attachments（图片会堆在文末） */
+const buildBlocks = (
+  content: string,
+  attachments: Attachment[],
+  storedBlocks?: StoredBlock[]
+): Block[] => {
+  if (storedBlocks && storedBlocks.length > 0) {
+    return blocksFromStored(storedBlocks);
+  }
   const blocks: Block[] = [{ id: 'b0', kind: 'text', text: content }];
   attachments.forEach((att) => {
     blocks.push({ id: att.id, kind: 'media', attachment: att });
@@ -57,6 +75,12 @@ const buildBlocks = (content: string, attachments: Attachment[]): Block[] => {
   });
   return blocks;
 };
+
+/** 序列化为可存储的 blocks */
+const serializeBlocks = (blocks: Block[]): StoredBlock[] =>
+  blocks.map((b) =>
+    b.kind === 'text' ? { kind: 'text', text: b.text } : { kind: 'media', attachment: b.attachment }
+  );
 
 const extractText = (blocks: Block[]): string =>
   blocks
@@ -81,7 +105,7 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const [title, setTitle] = useState(note?.title || '');
   const [blocks, setBlocks] = useState<Block[]>(() =>
-    buildBlocks(note?.content || '', note?.attachments || [])
+    buildBlocks(note?.content || '', note?.attachments || [], note?.blocks)
   );
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   // 是否有未保存的修改
@@ -115,6 +139,7 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
         title: t,
         content: extractText(b),
         attachments: extractAttachments(b),
+        blocks: serializeBlocks(b),
       });
     },
     [noteId, updateNote]
@@ -156,23 +181,48 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
     setIsDirty(false);
   }, [title, blocks, doSave]);
 
+  // ── 打印给 AI（调试用，在控制台查看输出）────────────────────────────────────
+  const handlePrintForAI = useCallback(() => {
+    const noteForAI: Note = {
+      id: noteId || '',
+      folderId: note?.folderId || '',
+      title,
+      content: extractText(blocks),
+      attachments: extractAttachments(blocks),
+      isPinned: note?.isPinned ?? false,
+      createdAt: note?.createdAt || new Date().toISOString(),
+      updatedAt: note?.updatedAt || new Date().toISOString(),
+    };
+    printForAI(formatNoteForAI(noteForAI), `当前笔记 AI 输入 (${title || '无标题'})`);
+  }, [noteId, note, title, blocks]);
+
   // ── 导航栏 ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     navigation.setOptions({
       headerShown: true,
-      headerRight: () =>
-        isDirty ? (
+      headerRight: () => (
+        <View style={styles.headerRight}>
           <TouchableOpacity
-            onPress={handleSave}
+            onPress={handlePrintForAI}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             style={styles.confirmBtn}
-            activeOpacity={0.7}
           >
-            <Ionicons name="checkmark-circle" size={28} color={Colors.primary} />
+            <Text style={styles.debugBtnText}>打印</Text>
           </TouchableOpacity>
-        ) : null,
+          {isDirty && (
+            <TouchableOpacity
+              onPress={handleSave}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              style={styles.confirmBtn}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="checkmark-circle" size={28} color={Colors.primary} />
+            </TouchableOpacity>
+          )}
+        </View>
+      ),
     });
-  }, [navigation, handleSave, isDirty]);
+  }, [navigation, handleSave, handlePrintForAI, isDirty]);
 
   // 拦截返回事件（系统返回按钮 / 手势），保证保存
   useEffect(() => {
@@ -204,7 +254,7 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
     setIsDirty(true);
   }, []);
 
-  // ── 插入媒体块（在光标位置，紧挨着当前选中处）────────────────────────────────────
+  // ── 插入媒体块（在光标位置，紧挨当前选中处）────────────────────────────────────
   const pendingFocusBlockId = useRef<string | null>(null);
 
   const insertMediaBlock = useCallback((attachment: Attachment) => {
@@ -218,17 +268,17 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
     setBlocks((prev) => {
       const idx = prev.findIndex((b) => b.id === blockId);
       const afterId = uid();
-      const afterTextBlock: TextBlock = { id: afterId, kind: 'text', text: '' };
+      const afterBlock: TextBlock = { id: afterId, kind: 'text', text: '' };
 
       if (idx < 0) {
         pendingFocusBlockId.current = afterId;
-        return [...prev, mediaBlock, afterTextBlock];
+        return [...prev, mediaBlock, afterBlock];
       }
       const current = prev[idx];
       if (current.kind !== 'text') {
         pendingFocusBlockId.current = afterId;
         const next = [...prev];
-        next.splice(idx + 1, 0, mediaBlock, afterTextBlock);
+        next.splice(idx + 1, 0, mediaBlock, afterBlock);
         return next;
       }
       const text = current.text;
@@ -237,10 +287,10 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
       const afterText = text.slice(pos);
       const beforeId = uid();
       const beforeBlock: TextBlock = { id: beforeId, kind: 'text', text: beforeText };
-      const afterBlock: TextBlock = { id: afterId, kind: 'text', text: afterText };
+      const newAfterBlock: TextBlock = { id: afterId, kind: 'text', text: afterText };
       pendingFocusBlockId.current = afterId;
       const next = [...prev];
-      next.splice(idx, 1, beforeBlock, mediaBlock, afterBlock);
+      next.splice(idx, 1, beforeBlock, mediaBlock, newAfterBlock);
       return next;
     });
     setIsDirty(true);
@@ -252,6 +302,36 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
         inputRefs.current.get(toFocus)?.focus();
       }
     }, 150);
+  }, []);
+
+  // ── 删除空文字块（Web 端空行可删除）──────────────────────────────────────────
+  const removeEmptyTextBlock = useCallback((blockId: string) => {
+    let focusBlockId: string | null = null;
+    setBlocks((prev) => {
+      const idx = prev.findIndex((b) => b.id === blockId);
+      if (idx < 0) return prev;
+      const block = prev[idx];
+      if (block.kind !== 'text' || block.text !== '') return prev;
+      const next = [...prev];
+      next.splice(idx, 1);
+      // 计算要聚焦的块
+      if (idx <= 0) {
+        const nextText = next.find((b) => b.kind === 'text') as TextBlock | undefined;
+        if (nextText) focusBlockId = nextText.id;
+      } else {
+        const prevBlock = prev[idx - 1];
+        if (prevBlock?.kind === 'text') focusBlockId = prevBlock.id;
+        else {
+          const nextText = next.slice(idx - 1).find((b) => b.kind === 'text') as TextBlock | undefined;
+          if (nextText) focusBlockId = nextText.id;
+        }
+      }
+      return next;
+    });
+    setIsDirty(true);
+    if (focusBlockId) {
+      setTimeout(() => inputRefs.current.get(focusBlockId!)?.focus(), 50);
+    }
   }, []);
 
   // ── 删除媒体块 ──────────────────────────────────────────────────────────────
@@ -290,6 +370,65 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
     }
     setIsDirty(true);
   }, []);
+
+  // ── Backspace 处理（空块删除空行；有内容时删除上方媒体）────────────────────────
+  const handleBackspace = useCallback(
+    (block: TextBlock) => (e: { nativeEvent: { key: string }; preventDefault?: () => void }) => {
+      if (e.nativeEvent.key !== 'Backspace') return;
+      const sel = blockSelectionsRef.current[block.id];
+      const atStart =
+        block.text === '' || !sel || (sel.start === 0 && sel.end === 0);
+      if (!atStart) return;
+      const idx = blocks.findIndex((b) => b.id === block.id);
+      if (block.text === '') {
+        e.preventDefault?.();
+        removeEmptyTextBlock(block.id);
+        return;
+      }
+      if (idx <= 0) return;
+      const prevBlock = blocks[idx - 1];
+      if (prevBlock.kind === 'media') {
+        e.preventDefault?.();
+        removeMediaBlock(prevBlock.id);
+      }
+    },
+    [blocks, removeEmptyTextBlock, removeMediaBlock]
+  );
+
+  // Web 端：TextInput 的 onKeyDown 可能不触发，用 document 监听 keydown
+  const isEditorFocusedRef = useRef(false);
+  const isBodyFocusedRef = useRef(false);
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Backspace') return;
+      if (!isEditorFocusedRef.current || !isBodyFocusedRef.current) return;
+      const blockId = activeTextBlockId.current;
+      const block = blocksRef.current.find((b) => b.id === blockId);
+      if (!block || block.kind !== 'text') return;
+      const sel = blockSelectionsRef.current[block.id];
+      const atStart =
+        block.text === '' || !sel || (sel.start === 0 && sel.end === 0);
+      if (!atStart) return;
+      const idx = blocksRef.current.findIndex((b) => b.id === block.id);
+      if (block.text === '') {
+        e.preventDefault();
+        removeEmptyTextBlock(block.id);
+        return;
+      }
+      if (idx <= 0) return;
+      const prevBlock = blocksRef.current[idx - 1];
+      if (prevBlock.kind === 'media') {
+        e.preventDefault();
+        removeMediaBlock(prevBlock.id);
+      }
+    };
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => document.removeEventListener('keydown', onKeyDown, true);
+  }, [removeEmptyTextBlock, removeMediaBlock]);
+
+  const blocksRef = useRef(blocks);
+  blocksRef.current = blocks;
 
   // ── 相机 ────────────────────────────────────────────────────────────────────
   const handleCamera = useCallback(async () => {
@@ -494,6 +633,8 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
           }}
           underlineColorAndroid="transparent"
           selectionColor={Colors.primary}
+          onFocus={() => { if (Platform.OS === 'web') (isEditorFocusedRef as React.MutableRefObject<boolean>).current = true; }}
+          onBlur={() => { if (Platform.OS === 'web') (isEditorFocusedRef as React.MutableRefObject<boolean>).current = false; }}
           onContentSizeChange={(e) => setHeight('title', e.nativeEvent.contentSize.height)}
         />
 
@@ -501,9 +642,11 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
         {blocks.map((block, index) => {
           if (block.kind === 'text') {
             const blockHeight = inputHeights[block.id];
-            // 仅首个块且为空时保留较大最小高度（开始记录区），有内容或非首块均按内容高度，最小一行
-            const minH = index === 0 && block.text === '' ? 200 : 26;
-            const h = Math.max(minH, blockHeight || 0);
+            // 空块几乎不占空间（1px 保证可聚焦）；仅当全文档只有一个空块时保留 200（开始记录区）
+            const isEmpty = block.text === '';
+            const isOnlyBlock = blocks.length === 1;
+            const minH = isEmpty ? (isOnlyBlock ? 200 : 1) : 26;
+            const h = isEmpty && !isOnlyBlock ? 1 : Math.max(minH, blockHeight || 0);
             return (
               <TextInput
                 key={block.id}
@@ -525,27 +668,24 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
                 selection={
                   focusAndSelection?.blockId === block.id ? focusAndSelection.selection : undefined
                 }
-                onFocus={() => { activeTextBlockId.current = block.id; }}
+                onFocus={() => {
+                  activeTextBlockId.current = block.id;
+                  if (Platform.OS === 'web') {
+                    (isEditorFocusedRef as React.MutableRefObject<boolean>).current = true;
+                    (isBodyFocusedRef as React.MutableRefObject<boolean>).current = true;
+                  }
+                }}
+                onBlur={() => {
+                  if (Platform.OS === 'web') {
+                    (isBodyFocusedRef as React.MutableRefObject<boolean>).current = false;
+                    (isEditorFocusedRef as React.MutableRefObject<boolean>).current = false;
+                  }
+                }}
                 onContentSizeChange={(e) => setHeight(block.id, e.nativeEvent.contentSize.height)}
                 onSelectionChange={(e) => {
                   blockSelectionsRef.current[block.id] = e.nativeEvent.selection;
                 }}
-                onKeyPress={(e) => {
-                  if (e.nativeEvent.key === 'Backspace') {
-                    const idx = blocks.findIndex((b) => b.id === block.id);
-                    if (idx <= 0) return;
-                    const prevBlock = blocks[idx - 1];
-                    if (prevBlock.kind !== 'media') return;
-                    // 光标在开头时按 Backspace 删除上方媒体块（空块时移动端 selection 可能不可靠，直接视为在开头）
-                    const sel = blockSelectionsRef.current[block.id];
-                    const atStart =
-                      block.text === '' || !sel || (sel.start === 0 && sel.end === 0);
-                    if (atStart) {
-                      e.preventDefault?.();
-                      removeMediaBlock(prevBlock.id);
-                    }
-                  }
-                }}
+                onKeyPress={Platform.OS !== 'web' ? handleBackspace(block) : undefined}
               />
             );
           }
@@ -608,8 +748,17 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
 
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
   confirmBtn: {
     padding: 2,
+  },
+  debugBtnText: {
+    fontSize: 13,
+    color: Colors.tertiaryLabel,
   },
 
   dateText: {
@@ -632,7 +781,7 @@ const styles = StyleSheet.create({
     minHeight: 40,
   },
 
-  // 正文文字块 - 完全透明无边框，高度由 onContentSizeChange 动态控制
+  // 正文文字块 - 完全透明无边框，minHeight/height 由行内样式控制（避免插入后空行）
   bodyInput: {
     fontSize: Typography.sizes.body,
     fontWeight: Typography.weights.regular,
@@ -642,12 +791,11 @@ const styles = StyleSheet.create({
     margin: 0,
     borderWidth: 0,
     backgroundColor: 'transparent',
-    minHeight: 200,   // 初始给足够高度，之后由内容撑开
   },
 
-  // 内联图片/视频（紧凑边距，紧挨文字）
+  // 内联图片/视频（无上下边距，紧挨文字）
   inlineMedia: {
-    marginVertical: 4,
+    marginVertical: 0,
     borderRadius: BorderRadius.md,
     overflow: 'hidden',
   },

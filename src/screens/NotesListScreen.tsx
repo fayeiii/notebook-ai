@@ -21,6 +21,7 @@ import { useNotesStore } from '../store/useNotesStore';
 import { format, isToday, isYesterday, isThisWeek, isThisYear } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import { Ionicons } from '@expo/vector-icons';
+import { formatNotesForAI, printForAI } from '../utils/formatForAI';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'NotesList'>;
 
@@ -95,12 +96,21 @@ const NotesListScreen: React.FC<Props> = ({ navigation, route }) => {
     );
   }, [notes, searchQuery]);
 
-  // 移除右上角按钮，只保留底部新建按钮
+  // 打印给 AI（调试用，在控制台查看输出）
+  const handlePrintForAI = useCallback(() => {
+    const data = formatNotesForAI(filteredNotes);
+    printForAI(data, `当前文件夹 AI 输入 (${folderName}, ${filteredNotes.length} 条)`);
+  }, [filteredNotes, folderName]);
+
   React.useLayoutEffect(() => {
     navigation.setOptions({
-      headerRight: () => null,
+      headerRight: () => (
+        <TouchableOpacity onPress={handlePrintForAI} style={styles.debugBtn}>
+          <Text style={styles.debugBtnText}>打印</Text>
+        </TouchableOpacity>
+      ),
     });
-  }, [navigation]);
+  }, [navigation, handlePrintForAI]);
 
   const handleCreateNote = useCallback(() => {
     const targetFolderId = folderId === 'all-notes' ? 'default' : folderId;
@@ -422,6 +432,13 @@ const styles = StyleSheet.create({
   },
   composeIcon: {
     fontSize: 20,
+  },
+  debugBtn: {
+    padding: 8,
+  },
+  debugBtnText: {
+    fontSize: 13,
+    color: Colors.tertiaryLabel,
   },
 });
 
