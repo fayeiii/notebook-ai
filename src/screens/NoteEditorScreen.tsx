@@ -706,17 +706,8 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
       {/* 底部工具栏 */}
       <View style={[styles.toolbar, isKeyboardVisible && styles.toolbarKeyboard]}>
         <View style={styles.toolbarLeft}>
-          <TouchableOpacity style={styles.toolButton} onPress={showAttachmentPicker}>
-            <Text style={styles.toolIcon}>📎</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.toolButton} onPress={handleCamera}>
-            <Text style={styles.toolIcon}>📷</Text>
-          </TouchableOpacity>
           <TouchableOpacity style={styles.toolButton} onPress={handleImagePicker}>
             <Text style={styles.toolIcon}>🖼</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.toolButton} onPress={handleAudioRecord}>
-            <Text style={styles.toolIcon}>🎙</Text>
           </TouchableOpacity>
         </View>
         {isKeyboardVisible && (
