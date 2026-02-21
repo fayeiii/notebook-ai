@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 笔记编辑页面
  * 块编辑器 - 文字+图片无缝交错，整页书写体验
  */
@@ -97,6 +97,11 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
   const blockSelectionsRef = useRef<Record<string, { start: number; end: number }>>({});
   const scrollViewRef = useRef<ScrollView>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 删除媒体块后，将光标定位到合并文字块的指定位置（图片原占位处）
+  const [focusAndSelection, setFocusAndSelection] = useState<{
+    blockId: string;
+    selection: { start: number; end: number };
+  } | null>(null);
 
   const setHeight = useCallback((id: string, h: number) => {
     setInputHeights((prev) => (prev[id] === h ? prev : { ...prev, [id]: h }));
@@ -133,6 +138,16 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
     const s2 = Keyboard.addListener(hide, () => setIsKeyboardVisible(false));
     return () => { s1.remove(); s2.remove(); };
   }, []);
+
+  // ── 删除媒体块后聚焦并定位光标 ────────────────────────────────────────────────
+  useEffect(() => {
+    if (!focusAndSelection) return;
+    const timer = setTimeout(() => {
+      inputRefs.current.get(focusAndSelection.blockId)?.focus();
+      setFocusAndSelection(null);
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [focusAndSelection]);
 
   // ── 手动保存（完成按钮） ────────────────────────────────────────────────────
   const handleSave = useCallback(() => {
@@ -189,47 +204,90 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
     setIsDirty(true);
   }, []);
 
-  // ── 插入媒体块 ──────────────────────────────────────────────────────────────
+  // ── 插入媒体块（在光标位置，紧挨着当前选中处）────────────────────────────────────
+  const pendingFocusBlockId = useRef<string | null>(null);
+
   const insertMediaBlock = useCallback((attachment: Attachment) => {
     const mediaBlock: MediaBlock = { id: attachment.id, kind: 'media', attachment };
-    const afterId = uid();
-    const afterTextBlock: TextBlock = { id: afterId, kind: 'text', text: '' };
+    const blockId = activeTextBlockId.current;
+    const sel = blockSelectionsRef.current[blockId];
+    const cursorPos = sel ? sel.start : 0;
+
+    pendingFocusBlockId.current = null;
 
     setBlocks((prev) => {
-      const idx = prev.findIndex((b) => b.id === activeTextBlockId.current);
-      const insertAt = idx >= 0 ? idx + 1 : prev.length;
+      const idx = prev.findIndex((b) => b.id === blockId);
+      const afterId = uid();
+      const afterTextBlock: TextBlock = { id: afterId, kind: 'text', text: '' };
+
+      if (idx < 0) {
+        pendingFocusBlockId.current = afterId;
+        return [...prev, mediaBlock, afterTextBlock];
+      }
+      const current = prev[idx];
+      if (current.kind !== 'text') {
+        pendingFocusBlockId.current = afterId;
+        const next = [...prev];
+        next.splice(idx + 1, 0, mediaBlock, afterTextBlock);
+        return next;
+      }
+      const text = current.text;
+      const pos = Math.min(Math.max(0, cursorPos), text.length);
+      const beforeText = text.slice(0, pos);
+      const afterText = text.slice(pos);
+      const beforeId = uid();
+      const beforeBlock: TextBlock = { id: beforeId, kind: 'text', text: beforeText };
+      const afterBlock: TextBlock = { id: afterId, kind: 'text', text: afterText };
+      pendingFocusBlockId.current = afterId;
       const next = [...prev];
-      next.splice(insertAt, 0, mediaBlock, afterTextBlock);
+      next.splice(idx, 1, beforeBlock, mediaBlock, afterBlock);
       return next;
     });
     setIsDirty(true);
 
     setTimeout(() => {
-      inputRefs.current.get(afterId)?.focus();
-      activeTextBlockId.current = afterId;
+      const toFocus = pendingFocusBlockId.current;
+      if (toFocus) {
+        activeTextBlockId.current = toFocus;
+        inputRefs.current.get(toFocus)?.focus();
+      }
     }, 150);
   }, []);
 
   // ── 删除媒体块 ──────────────────────────────────────────────────────────────
   const removeMediaBlock = useCallback((blockId: string) => {
+    let focusInfo: { blockId: string; selection: { start: number; end: number } } | null = null;
+    let focusBlockId: string | null = null;
+
     setBlocks((prev) => {
       const idx = prev.findIndex((b) => b.id === blockId);
       if (idx < 0) return prev;
       const next = [...prev];
-      const before = next[idx - 1];
-      const after = next[idx + 1];
+      const before = next[idx - 1] as TextBlock | undefined;
+      const after = next[idx + 1] as TextBlock | undefined;
       if (before?.kind === 'text' && after?.kind === 'text') {
+        const separator = before.text && after.text ? '\n' : '';
         const merged: TextBlock = {
           id: before.id,
           kind: 'text',
-          text: before.text + (before.text && after.text ? '\n' : '') + after.text,
+          text: before.text + separator + after.text,
         };
         next.splice(idx - 1, 3, merged);
+        // 光标定位到图片原占位处（即合并后「前文」的末尾）
+        focusInfo = { blockId: before.id, selection: { start: before.text.length, end: before.text.length } };
       } else {
         next.splice(idx, 1);
+        // 非合并删除：聚焦前一个或后一个文字块
+        const toFocus = (before?.kind === 'text' ? before : after?.kind === 'text' ? after : null);
+        if (toFocus) focusBlockId = toFocus.id;
       }
       return next;
     });
+    if (focusInfo) {
+      setFocusAndSelection(focusInfo);
+    } else if (focusBlockId) {
+      setTimeout(() => inputRefs.current.get(focusBlockId!)?.focus(), 80);
+    }
     setIsDirty(true);
   }, []);
 
@@ -327,6 +385,13 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
   const renderMediaBlock = (block: MediaBlock) => {
     const { attachment } = block;
 
+    const onRemoveFile = () => {
+      Alert.alert('删除附件', '确定删除此附件？', [
+        { text: '取消', style: 'cancel' },
+        { text: '删除', style: 'destructive', onPress: () => removeMediaBlock(block.id) },
+      ]);
+    };
+
     if (attachment.type === 'image') {
       const dims = imageDimensions[block.id];
       // 按图片真实比例计算高度；不强制截断，让竖图完整显示
@@ -371,12 +436,6 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
       );
     }
 
-    // 文件/音频 — 保留删除按钮（不影响行内编辑流）
-    const onRemove = () =>
-      Alert.alert('删除附件', '确定删除此附件？', [
-        { text: '取消', style: 'cancel' },
-        { text: '删除', style: 'destructive', onPress: () => removeMediaBlock(block.id) },
-      ]);
     return (
       <View key={block.id} style={styles.inlineFile}>
         <Text style={styles.fileIcon}>{attachment.type === 'audio' ? '🎵' : '📎'}</Text>
@@ -386,7 +445,7 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
             <Text style={styles.fileSize}>{formatFileSize(attachment.fileSize)}</Text>
           )}
         </View>
-        <TouchableOpacity onPress={onRemove} style={styles.fileRemoveBtn}>
+        <TouchableOpacity onPress={onRemoveFile} style={styles.fileRemoveBtn}>
           <Text style={styles.fileRemoveIcon}>{'✕'}</Text>
         </TouchableOpacity>
       </View>
@@ -442,6 +501,9 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
         {blocks.map((block, index) => {
           if (block.kind === 'text') {
             const blockHeight = inputHeights[block.id];
+            // 仅首个块且为空时保留较大最小高度（开始记录区），有内容或非首块均按内容高度，最小一行
+            const minH = index === 0 && block.text === '' ? 200 : 26;
+            const h = Math.max(minH, blockHeight || 0);
             return (
               <TextInput
                 key={block.id}
@@ -449,7 +511,7 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
                 style={[
                   styles.bodyInput,
                   webNoOutline as any,
-                  { height: Math.max(200, blockHeight || 0) },
+                  { height: h, minHeight: minH },
                 ]}
                 placeholder={index === 0 ? '开始记录...' : ''}
                 placeholderTextColor={Colors.placeholderText}
@@ -460,6 +522,9 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
                 scrollEnabled={false}
                 underlineColorAndroid="transparent"
                 selectionColor={Colors.primary}
+                selection={
+                  focusAndSelection?.blockId === block.id ? focusAndSelection.selection : undefined
+                }
                 onFocus={() => { activeTextBlockId.current = block.id; }}
                 onContentSizeChange={(e) => setHeight(block.id, e.nativeEvent.contentSize.height)}
                 onSelectionChange={(e) => {
@@ -467,21 +532,17 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
                 }}
                 onKeyPress={(e) => {
                   if (e.nativeEvent.key === 'Backspace') {
+                    const idx = blocks.findIndex((b) => b.id === block.id);
+                    if (idx <= 0) return;
+                    const prevBlock = blocks[idx - 1];
+                    if (prevBlock.kind !== 'media') return;
+                    // 光标在开头时按 Backspace 删除上方媒体块（空块时移动端 selection 可能不可靠，直接视为在开头）
                     const sel = blockSelectionsRef.current[block.id];
-                    const atStart = !sel || (sel.start === 0 && sel.end === 0);
-                    if (atStart && block.text === '') {
-                      // 光标在开头且文字为空 → 删除上面的媒体块
-                      const idx = blocks.findIndex((b) => b.id === block.id);
-                      if (idx > 0 && blocks[idx - 1].kind === 'media') {
-                        e.preventDefault?.();
-                        removeMediaBlock(blocks[idx - 1].id);
-                        // 聚焦到合并后的文字块
-                        setTimeout(() => {
-                          const updated = blocks.filter((b) => b.id !== blocks[idx - 1].id && b.id !== block.id);
-                          const target = updated[Math.max(0, idx - 2)];
-                          if (target?.kind === 'text') inputRefs.current.get(target.id)?.focus();
-                        }, 50);
-                      }
+                    const atStart =
+                      block.text === '' || !sel || (sel.start === 0 && sel.end === 0);
+                    if (atStart) {
+                      e.preventDefault?.();
+                      removeMediaBlock(prevBlock.id);
                     }
                   }
                 }}
@@ -584,9 +645,9 @@ const styles = StyleSheet.create({
     minHeight: 200,   // 初始给足够高度，之后由内容撑开
   },
 
-  // 内联图片/视频
+  // 内联图片/视频（紧凑边距，紧挨文字）
   inlineMedia: {
-    marginVertical: Spacing.sm,
+    marginVertical: 4,
     borderRadius: BorderRadius.md,
     overflow: 'hidden',
   },
@@ -609,17 +670,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6, paddingVertical: 2,
     borderRadius: 4, overflow: 'hidden',
   },
-  removeButton: {
-    position: 'absolute', top: 8, right: 8,
-    width: 26, height: 26, borderRadius: 13,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    justifyContent: 'center', alignItems: 'center',
-  },
-  removeIcon: {
-    fontSize: 13, color: Colors.white,
-    fontWeight: Typography.weights.bold,
-  },
-
   // 内联文件
   inlineFile: {
     flexDirection: 'row', alignItems: 'center',
