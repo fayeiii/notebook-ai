@@ -169,7 +169,11 @@ type StoredBlock =
 
 打印输出（控制台）的完整格式示例，供 AI 分析时参考：
 
-![日记 AI 输入样式截图](assets/screenshot1.png)
+<p align="center">
+  <img src="assets/screenshot1.png" width="200" />
+  <img src="assets/screenshot2.png" width="200" />
+  <img src="assets/screenshot3.png" width="200" />
+</p>
 
 ```json
 ========== 当前文件夹 AI 输入 (日记, 2 条) ==========
