@@ -193,7 +193,7 @@ type StoredBlock =
           "fileName": "e090f43c-a029-476d-a88a-dde46c35641c.jpeg",
           "fileSize": 199974,
           "mimeType": "image/jpeg",
-          "uri": "file:///data/user/0/host.exp.exponent/cache/ExperienceData/%2540anonymous%252Fnotebook-ai-61400bd0-ef08-44f3-9cb2-095e287322bb/ImagePicker/84b5c403-8fb9-411e-b3e8-58f69c976129.jpeg"
+          "base64": "data:image/jpeg;base64,/9j/4AAQSkZJRg..."
         }
       ],
       "createdAt": "2026-02-21T07:01:38.197Z",
@@ -206,7 +206,7 @@ type StoredBlock =
 ====================================
 ```
 
-> **说明**：`uri` 为本地路径，AI 无法直接访问；若需分析图片内容，需另行导出或上传。
+> **说明**：图片附件会转为 `base64`（`data:image/jpeg;base64,xxx` 格式），AI 可直接分析；非图片附件仍为 `uri` 本地路径。
 
 ## Windows 用户注意
 

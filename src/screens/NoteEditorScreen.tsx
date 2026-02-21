@@ -181,8 +181,8 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
     setIsDirty(false);
   }, [title, blocks, doSave]);
 
-  // ── 打印给 AI（调试用，在控制台查看输出）────────────────────────────────────
-  const handlePrintForAI = useCallback(() => {
+  // ── 打印给 AI（调试用，图片转 base64）────────────────────────────────────
+  const handlePrintForAI = useCallback(async () => {
     const noteForAI: Note = {
       id: noteId || '',
       folderId: note?.folderId || '',
@@ -193,7 +193,8 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
       createdAt: note?.createdAt || new Date().toISOString(),
       updatedAt: note?.updatedAt || new Date().toISOString(),
     };
-    printForAI(formatNoteForAI(noteForAI), `当前笔记 AI 输入 (${title || '无标题'})`);
+    const data = await formatNoteForAI(noteForAI);
+    printForAI(data, `当前笔记 AI 输入 (${title || '无标题'})`);
   }, [noteId, note, title, blocks]);
 
   // ── 导航栏 ──────────────────────────────────────────────────────────────────
