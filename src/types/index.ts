@@ -5,7 +5,7 @@
 /** 附件类型 */
 export type AttachmentType = 'image' | 'video' | 'audio' | 'file';
 
-/** 附件数据 */
+/** 附件数据（存储格式，uri 为本地路径） */
 export interface Attachment {
   id: string;
   type: AttachmentType;
@@ -16,6 +16,34 @@ export interface Attachment {
   duration?: number; // 音频/视频时长（秒）
   thumbnailUri?: string;
   createdAt: string;
+}
+
+/** AI 输入用的附件格式（仅元数据，不含 base64/uri 以节省 token） */
+export interface AttachmentForAI {
+  id: string;
+  type: AttachmentType;
+  fileName: string;
+  fileSize?: number;
+  mimeType?: string;
+  duration?: number;
+}
+
+/** AI 输入用的块格式（保留文字与附件的交错顺序） */
+export type BlockForAI =
+  | { kind: 'text'; text: string }
+  | { kind: 'media'; attachment: AttachmentForAI };
+
+/** AI 输入用的笔记格式（blocks 保留图片位置） */
+export interface NoteForAI {
+  id: string;
+  folderId: string;
+  title: string;
+  content: string;
+  /** 块结构，保留文字与图片在正文中的交错顺序；无 blocks 时用 attachments */
+  blocks?: BlockForAI[];
+  attachments: AttachmentForAI[];
+  createdAt: string;
+  updatedAt: string;
 }
 
 /** 可序列化的块（用于持久化，保留文字与附件的交错顺序） */

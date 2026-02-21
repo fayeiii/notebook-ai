@@ -181,8 +181,8 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
     setIsDirty(false);
   }, [title, blocks, doSave]);
 
-  // ── 打印给 AI（调试用，图片转 base64）────────────────────────────────────
-  const handlePrintForAI = useCallback(async () => {
+  // ── 打印给 AI（调试用，仅元数据节省 token）────────────────────────────────
+  const handlePrintForAI = useCallback(() => {
     const noteForAI: Note = {
       id: noteId || '',
       folderId: note?.folderId || '',
@@ -193,7 +193,7 @@ const NoteEditorScreen: React.FC<Props> = ({ navigation, route }) => {
       createdAt: note?.createdAt || new Date().toISOString(),
       updatedAt: note?.updatedAt || new Date().toISOString(),
     };
-    const data = await formatNoteForAI(noteForAI);
+    const data = formatNoteForAI(noteForAI, serializeBlocks(blocks));
     printForAI(data, `当前笔记 AI 输入 (${title || '无标题'})`);
   }, [noteId, note, title, blocks]);
 

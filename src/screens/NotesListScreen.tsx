@@ -96,9 +96,9 @@ const NotesListScreen: React.FC<Props> = ({ navigation, route }) => {
     );
   }, [notes, searchQuery]);
 
-  // 打印给 AI（调试用，图片转 base64）
-  const handlePrintForAI = useCallback(async () => {
-    const data = await formatNotesForAI(filteredNotes);
+  // 打印给 AI（调试用，仅元数据节省 token）
+  const handlePrintForAI = useCallback(() => {
+    const data = formatNotesForAI(filteredNotes);
     printForAI(data, `当前文件夹 AI 输入 (${folderName}, ${filteredNotes.length} 条)`);
   }, [filteredNotes, folderName]);
 

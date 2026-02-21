@@ -126,7 +126,7 @@ type StoredBlock =
   | { kind: 'media'; attachment: Attachment };
 ```
 
-### 附件（Attachment）结构
+### 附件（Attachment）结构（存储格式）
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
@@ -139,6 +139,19 @@ type StoredBlock =
 | `duration` | number? | 音视频时长（秒） |
 | `thumbnailUri` | string? | 缩略图路径 |
 | `createdAt` | string | 创建时间（ISO 8601） |
+
+### AI 输入用的附件格式（AttachmentForAI）
+
+`formatForAI` 输出时仅包含元数据（不含 base64/uri），以节省 token：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | string | 唯一标识 |
+| `type` | string | `image` \| `video` \| `audio` \| `file` |
+| `fileName` | string | 文件名 |
+| `fileSize` | number? | 文件大小（字节） |
+| `mimeType` | string? | MIME 类型 |
+| `duration` | number? | 音视频时长（秒） |
 
 ### 正文 content 格式
 
@@ -159,54 +172,110 @@ type StoredBlock =
 ![日记 AI 输入样式截图](assets/screenshot1.png)
 
 ```json
-========== 当前文件夹 AI 输入 (xxx, 3 条) ==========
+========== 当前文件夹 AI 输入 (日记, 2 条) ==========
 
 {
   "notes": [
     {
-      "id": "mlvz3o0bx05vrt0n",
-      "folderId": "work",
-      "title": "123",
-      "content": "33",
-      "attachments": [],
-      "createdAt": "2026-02-21T07:04:08.267Z",
-      "updatedAt": "2026-02-21T07:04:12.185Z"
-    },
-    {
-      "id": "mlvz24f8jcd0z3b9",
+      "id": "mlvzo5l3nkcevgov",
       "folderId": "default",
-      "title": "test 22",
-      "content": "222",
-      "attachments": [],
-      "createdAt": "2026-02-21T07:02:56.228Z",
-      "updatedAt": "2026-02-21T07:03:13.530Z"
-    },
-    {
-      "id": "mlvz0g7p6jwh1cal",
-      "folderId": "default",
-      "title": "a111",
-      "content": "111\n\n1\n1\n1\n\n1",
-      "attachments": [
+      "title": "test-topic2",
+      "content": "123\n44",
+      "blocks": [
         {
-          "id": "nwqu297e",
-          "type": "image",
-          "fileName": "e090f43c-a029-476d-a88a-dde46c35641c.jpeg",
-          "fileSize": 199974,
-          "mimeType": "image/jpeg",
-          "base64": "data:image/jpeg;base64,/9j/4AAQSkZJRg..."
+          "kind": "text",
+          "text": "123\n44"
         }
       ],
-      "createdAt": "2026-02-21T07:01:38.197Z",
-      "updatedAt": "2026-02-21T07:02:44.629Z"
+      "attachments": [],
+      "createdAt": "2026-02-21T07:20:04.167Z",
+      "updatedAt": "2026-02-21T07:20:12.878Z"
+    },
+    {
+      "id": "mlvzni62i9mar5t9",
+      "folderId": "default",
+      "title": "test-Topic1",
+      "content": "123\n\n345",
+      "blocks": [
+        {
+          "kind": "text",
+          "text": "123\n"
+        },
+        {
+          "kind": "media",
+          "attachment": {
+            "id": "fg822svl",
+            "type": "image",
+            "fileName": "5d375e14-04bb-4a0c-96b4-4bc09097639b.jpeg",
+            "fileSize": 199977,
+            "mimeType": "image/jpeg"
+          }
+        },
+        {
+          "kind": "text",
+          "text": "\n345\n"
+        }
+      ],
+      "attachments": [
+        {
+          "id": "fg822svl",
+          "type": "image",
+          "fileName": "5d375e14-04bb-4a0c-96b4-4bc09097639b.jpeg",
+          "fileSize": 199977,
+          "mimeType": "image/jpeg"
+        }
+      ],
+      "createdAt": "2026-02-21T07:19:33.818Z",
+      "updatedAt": "2026-02-21T07:20:02.379Z"
     }
   ],
-  "totalCount": 3
+  "totalCount": 2
 }
 
 ====================================
 ```
 
-> **说明**：图片附件会转为 `base64`（`data:image/jpeg;base64,xxx` 格式），AI 可直接分析；非图片附件仍为 `uri` 本地路径。
+### 图片在正文中的位置（blocks）
+
+AI 输入格式包含 `blocks` 字段，按正文中的实际顺序排列，保留图片插入位置：
+
+```json
+{
+  "blocks": [
+    { "kind": "text", "text": "第一段文字" },
+    {
+      "kind": "media",
+      "attachment": {
+        "id": "img1",
+        "type": "image",
+        "fileName": "photo1.jpeg",
+        "mimeType": "image/jpeg"
+      }
+    },
+    { "kind": "text", "text": "第二段文字\n\n" },
+    {
+      "kind": "media",
+      "attachment": {
+        "id": "img2",
+        "type": "image",
+        "fileName": "photo2.png",
+        "mimeType": "image/png"
+      }
+    },
+    { "kind": "text", "text": "第三段" }
+  ],
+  "attachments": [...]
+}
+```
+
+- **有 blocks**：使用 `blocks` 可精确知道每张图片在正文中的位置
+- **无 blocks**（旧数据）：仅 `content` + `attachments`，图片顺序保留但位置需推断
+
+### 多张图片时的 attachments
+
+`attachments` 为数组，按出现顺序排列；`blocks` 中则包含完整交错结构。
+
+> **说明**：AI 输入仅包含附件元数据（如 `fileName`），不含 base64/uri，以节省 token。
 
 ## Windows 用户注意
 
